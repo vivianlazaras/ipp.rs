@@ -297,14 +297,14 @@ impl SendDocumentBuilder {
 
     /// Build operation
     pub fn build(self) -> Result<impl IppOperation, IppParseError> {
-        SendDocument::new(
+        Ok(SendDocument::new(
             self.printer_uri,
             self.job_id,
             self.payload,
             self.user_name.as_ref(),
             self.document_format.as_ref(),
             self.is_last,
-        )
+        )?)
     }
 }
 
@@ -333,7 +333,7 @@ impl PurgeJobsBuilder {
 
     /// Build operation
     pub fn build(self) -> Result<impl IppOperation, IppParseError> {
-        PurgeJobs::new(self.printer_uri, self.user_name)
+        Ok(PurgeJobs::new(self.printer_uri, self.user_name)?)
     }
 }
 
@@ -364,7 +364,7 @@ impl CancelJobBuilder {
 
     /// Build operation
     pub fn build(self) -> Result<impl IppOperation, IppParseError> {
-        CancelJob::new(self.printer_uri, self.job_id, self.user_name)
+        Ok(CancelJob::new(self.printer_uri, self.job_id, self.user_name)?)
     }
 }
 
@@ -395,7 +395,7 @@ impl GetJobAttributesBuilder {
 
     /// Build operation
     pub fn build(self) -> Result<impl IppOperation, IppParseError> {
-        GetJobAttributes::new(self.printer_uri, self.job_id, self.user_name)
+        Ok(GetJobAttributes::new(self.printer_uri, self.job_id, self.user_name)?)
     }
 }
 

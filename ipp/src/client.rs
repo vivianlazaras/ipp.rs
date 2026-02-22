@@ -219,7 +219,7 @@ pub mod non_blocking {
             let response = req_builder
                 .header("content-type", "application/ipp")
                 .body(Body::wrap_stream(tokio_util::io::ReaderStream::new(
-                    request.into().into_async_read().compat(),
+                    request.into().into_async_read()?.compat(),
                 )))
                 .send()
                 .await?;
@@ -332,7 +332,7 @@ pub mod blocking {
                 req = req.header(k, v);
             }
 
-            let response = req.send(SendBody::from_reader(&mut request.into().into_read()))?;
+            let response = req.send(SendBody::from_reader(&mut request.into().into_read()?))?;
             let reader = response.into_body().into_reader();
             let parser = IppParser::new(IppReader::new(reader));
 
