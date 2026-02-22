@@ -2,267 +2,16 @@
 //! IPP value
 //!
 #![allow(unused_assignments)]
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr, ops::Deref, io, borrow::Cow};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enum_as_inner::EnumAsInner;
 
-use http::Uri;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use crate::parser::IppParseError;
 use http::Uri;
-use std::ops::Deref;
-use std::borrow::Cow;
-use std::io;
 
 use crate::{FromPrimitive as _, model::ValueTag, parser::IppParseError};
-
-/// A UTF-8 string whose length is bounded by a compile-time maximum (in bytes).
-///
-/// This type is primarily used to enforce IPP `text(*)`, `name(*)`,
-/// `keyword`, and related value length limits defined by the IPP specification.
-///
-/// The length constraint is measured in UTF-8 encoded bytes,
-/// not Unicode scalar values.
-///
-/// # Type Parameter
-/// - `MAX`: Maximum allowed length in bytes.
-///
-/// # Errors
-/// Returns [`IppParseError::InvalidStringLength`] if the input exceeds `MAX`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BoundedString<const MAX: usize = 1023> {
-    inner: String,
-}
-
-pub type IppString = BoundedString;
-pub type IppShortString = BoundedString<127>;
-pub type IppKeyword = BoundedString<255>;
-pub type IppMimeMediaType = BoundedString<255>;
-pub type IppCharset = BoundedString<63>;
-pub type IppLanguage = BoundedString<63>;
-pub type IppName = BoundedString<255>;
-
-impl<const MAX: usize> BoundedString<MAX> {
-    /// attempts to create a bounded string from the given value returning an error if the strings length exceeds the const generic
-    /// defined for the type.
-    pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
-        let s = s.into();
-        let len = s.len();
-
-        if len > MAX {
-            return Err(IppParseError::InvalidStringLength { len, max: MAX });
-        }
-
-        Ok(Self { inner: s })
-    }
-
-    pub const fn max() -> usize {
-        MAX
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.inner
-    }
-
-    pub fn into_inner(self) -> String {
-        self.inner
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    /// Widen the max size of the bounded string.
-    /// Infallible because all strings of length <= MAX are valid for any larger MAX2.
-    /// if attempting to expand to a smaller `MAX2` the assertion will fail causing a panic.
-    pub fn expand<const MAX2: usize>(self) -> BoundedString<MAX2> {
-        assert!(MAX2 >= MAX);
-        BoundedString::<MAX2> { inner: self.inner }
-    }
-
-    /// Attempt to shrink a bounded string to a smaller MAX.
-    /// Returns an error if the actual string is too long for the target size.
-    pub fn shrink<const MAX2: usize>(self) -> Result<BoundedString<MAX2>, IppParseError> {
-        if self.len() > MAX2 {
-            return Err(IppParseError::InvalidStringLength {
-                len: self.len(),
-                max: MAX2,
-            });
-        }
-        Ok(BoundedString::<MAX2> { inner: self.inner })
-    }
-}
-
-impl<const MAX: usize> From<BoundedString<MAX>> for String {
-    fn from(value: BoundedString<MAX>) -> Self {
-        value.inner
-    }
-}
-
-impl<const MAX: usize> std::borrow::Borrow<str> for BoundedString<MAX> {
-    fn borrow(&self) -> &str {
-        &self.inner
-    }
-}
-
-impl<const MAX: usize> AsRef<str> for BoundedString<MAX> {
-    fn as_ref(&self) -> &str {
-        &self.inner
-    }
-}
-
-impl<const MAX: usize> Deref for BoundedString<MAX> {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<const MAX: usize> FromStr for BoundedString<MAX> {
-    type Err = IppParseError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::new(s)
-    }
-}
-
-impl<const MAX: usize> TryFrom<&str> for BoundedString<MAX> {
-    type Error = IppParseError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::new(s)
-    }
-}
-
-impl<const MAX: usize> TryFrom<String> for BoundedString<MAX> {
-    type Error = IppParseError;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::new(s)
-    }
-}
-
-impl<const MAX: usize> TryFrom<Cow<'_, str>> for BoundedString<MAX> {
-    type Error = IppParseError;
-    fn try_from(s: Cow<'_, str>) -> Result<Self, Self::Error> {
-        Self::new(s)
-    }
-}
-
-impl<const MAX: usize> fmt::Display for BoundedString<MAX> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.inner)
-    }
-}
-
-impl<const MAX: usize> TryFrom<Uri> for BoundedString<MAX> {
-    type Error = IppParseError;
-    fn try_from(u: Uri) -> Result<Self, Self::Error> {
-        u.to_string().try_into()
-    }
-}
-
-/// Represents an IPP `text(*)` value with length-tiered encoding.
-///
-/// IPP defines multiple text encodings depending on maximum length:
-/// - 0–127 bytes
-/// - 128–255 bytes
-/// - 256–1023 bytes
-///
-/// This enum selects the smallest valid representation automatically.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum IppTextValue {
-    Short(IppShortString),
-    Medium(BoundedString<255>),
-    Long(IppString),
-}
-
-impl IppTextValue {
-    pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
-        let string = s.into();
-        let len = string.len();
-        match len {
-            0..=127 => Ok(Self::Short(IppShortString::new(string)?)),
-            128..=255 => Ok(Self::Medium(BoundedString::<255>::new(string)?)),
-            256..=1023 => Ok(Self::Long(IppString::new(string)?)),
-            _ => Err(IppParseError::InvalidStringLength { len, max: 1023 }),
-        }
-    }
-    pub fn len(&self) -> usize {
-        self.as_ref().len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.as_ref().is_empty()
-    }
-}
-
-impl From<IppShortString> for IppTextValue {
-    fn from(value: IppShortString) -> Self {
-        Self::Short(value)
-    }
-}
-
-impl From<BoundedString<255>> for IppTextValue {
-    fn from(value: BoundedString<255>) -> Self {
-        Self::Medium(value)
-    }
-}
-
-impl From<IppString> for IppTextValue {
-    fn from(value: IppString) -> Self {
-        Self::Long(value)
-    }
-}
-
-impl AsRef<str> for IppTextValue {
-    fn as_ref(&self) -> &str {
-        match self {
-            IppTextValue::Short(s) => s.as_ref(),
-            IppTextValue::Medium(s) => s.as_ref(),
-            IppTextValue::Long(s) => s.as_ref(),
-        }
-    }
-}
-
-impl Deref for IppTextValue {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_ref()
-    }
-}
-
-impl TryFrom<&str> for IppTextValue {
-    type Error = IppParseError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::new(s)
-    }
-}
-
-impl TryFrom<String> for IppTextValue {
-    type Error = IppParseError;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::new(s)
-    }
-}
-
-impl TryFrom<Cow<'_, str>> for IppTextValue {
-    type Error = IppParseError;
-    fn try_from(s: Cow<'_, str>) -> Result<Self, Self::Error> {
-        Self::new(s)
-    }
-}
-
-impl fmt::Display for IppTextValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_ref())
-    }
-}
 
 /// A UTF-8 string whose length is bounded by a compile-time maximum (in bytes).
 ///
@@ -294,10 +43,10 @@ impl<const MAX: u16> BoundedString<MAX> {
     pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
         let s = s.into();
         let len_usize = s.len();
-        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength(len_usize, MAX))?;
+        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength { len: len_usize, max: MAX })?;
 
         if len > MAX {
-            return Err(IppParseError::InvalidStringLength(len_usize, MAX));
+            return Err(IppParseError::InvalidStringLength { len: len_usize, max: MAX });
         }
 
         Ok(Self(s))
@@ -336,7 +85,7 @@ impl<const MAX: u16> BoundedString<MAX> {
     /// Returns an error if the actual string is too long for the target size.
     pub fn shrink<const MAX2: u16>(self) -> Result<BoundedString<MAX2>, IppParseError> {
         if self.0.len() > MAX2 as usize {
-            return Err(IppParseError::InvalidStringLength(self.0.len(), MAX2));
+            return Err(IppParseError::InvalidStringLength { len: self.0.len(), max: MAX2 });
         }
         Ok(BoundedString::<MAX2>(self.0))
     }
@@ -429,10 +178,10 @@ impl IppTextValue {
         let string = s.into();
         let len = string.len();
         match len {
-            0..=127 => Ok(Self::Short(IppShortString::new(string).expect("bounding error on range check"))),
-            128..=255 => Ok(Self::Medium(BoundedString::<255>::new(string).expect("bounding error on range check"))),
-            256..=1023 => Ok(Self::Long(IppString::new(string).expect("bounding error on range check"))),
-            _ => Err(IppParseError::InvalidStringLength(len.try_into()?, 1023)),
+            0..=127 => Ok(Self::Short(IppShortString::new(string)?)),
+            128..=255 => Ok(Self::Medium(BoundedString::<255>::new(string)?)),
+            256..=1023 => Ok(Self::Long(IppString::new(string)?)),
+            _ => Err(IppParseError::InvalidStringLength { len: len.try_into()?, max: 1023 }),
         }
     }
     pub fn len(&self) -> usize {
@@ -506,14 +255,14 @@ impl fmt::Display for IppTextValue {
 #[inline]
 fn get_len_string(data: &mut Bytes) -> String {
     let len = data.get_u16() as usize;
-    let s = String::from_utf8_lossy(&data[0..len]).try_into().expect("failed to parse IppValue from String");
+    let s = String::from_utf8_lossy(&data[0..len]).into_owned();
     data.advance(len);
     s
 }
 
 /// IPP attribute values as defined in [RFC 8010](https://tools.ietf.org/html/rfc8010)
-/// unfortunately the length for TextWithoutLanguage, TextWithLanguage, and OctetString values is heavily attribute dependant
-/// usual values are 127, 255, and 1023 however as these are attribute dependent, a const generic is used to allow the calling routine to assert expected text length.
+/// the length for TextWithoutLanguage, TextWithLanguage, and OctetString values is heavily attribute dependant
+/// usual values are 127, 255, and 1023 however as these are attribute dependent, a [`IppTextValue`] is used to allow the calling routine to assert expected text length.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum IppValue {
