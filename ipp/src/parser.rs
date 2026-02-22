@@ -522,7 +522,11 @@ mod tests {
         assert_eq!(
             attr.value(),
             &IppValue::Collection(BTreeMap::from([(
+<<<<<<< HEAD
                 "abcd".try_into().unwrap(),
+=======
+                "abcd".to_string(),
+>>>>>>> 7440bc9 (fixed tests after switch to BoundedString)
                 IppValue::Keyword("key".try_into().expect("failed to create IPP text value"))
             )]))
         );
