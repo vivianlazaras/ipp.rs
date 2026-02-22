@@ -21,8 +21,7 @@ impl CupsGetPrinters {
 
 impl IppOperation for CupsGetPrinters {
     fn into_ipp_request(self) -> IppRequestResponse {
-        IppRequestResponse::new(self.version(), Operation::CupsGetPrinters, None)
-            .expect("cups list printers URI length check missing")
+        IppRequestResponse::new(self.version(), Operation::CupsGetPrinters, None).expect("cups list printers URI length check missing")
     }
 }
 
@@ -38,6 +37,6 @@ impl CupsDeletePrinter {
 
 impl IppOperation for CupsDeletePrinter {
     fn into_ipp_request(self) -> IppRequestResponse {
-        IppRequestResponse::new_internal(self.version(), Operation::CupsDeletePrinter, Some(self.0))
+        IppRequestResponse::new(self.version(), Operation::CupsDeletePrinter, Some(self.0)).expect("cups delete printer URI length check missing")
     }
 }

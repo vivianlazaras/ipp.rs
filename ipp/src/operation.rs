@@ -9,8 +9,10 @@ use crate::{
     parser::IppParseError,
     payload::IppPayload,
     request::IppRequestResponse,
-    value::{IppKeyword, IppMimeMediaType, IppName, IppString, IppValue},
+    value::{IppValue, IppName, IppMimeMediaType},
+    parser::IppParseError,
 };
+
 
 pub mod builder;
 pub mod cups;
@@ -88,7 +90,7 @@ impl PrintJob {
         D: AsRef<str>,
     {
         Ok(PrintJob {
-            printer_uri: printer_uri.try_into()?,
+            printer_uri,
             payload: payload.into(),
             user_name: user_name.map(|v| v.as_ref().to_string().try_into()).transpose()?,
             job_name: job_name.map(|v| v.as_ref().to_string().try_into()).transpose()?,
@@ -105,7 +107,7 @@ impl PrintJob {
 
 impl IppOperation for PrintJob {
     fn into_ipp_request(self) -> IppRequestResponse {
-        let mut retval = IppRequestResponse::new_internal(self.version(), Operation::PrintJob, Some(self.printer_uri));
+        let mut retval = IppRequestResponse::new(self.version(), Operation::PrintJob, Some(self.printer_uri)).expect("printer uri length check missing");
 
         with_user_name(self.user_name, &mut retval);
         with_document_format(self.document_format, &mut retval);
@@ -113,10 +115,7 @@ impl IppOperation for PrintJob {
         if let Some(job_name) = self.job_name {
             retval.attributes_mut().add(
                 DelimiterTag::OperationAttributes,
-                IppAttribute::new(
-                    IppAttribute::JOB_NAME.try_into().unwrap(),
-                    IppValue::NameWithoutLanguage(job_name),
-                ),
+                IppAttribute::new(IppAttribute::JOB_NAME, IppValue::NameWithoutLanguage(job_name.try_into().expect("job name length check missing"))),
             )
         }
 
@@ -168,10 +167,10 @@ impl GetPrinterAttributes {
 impl IppOperation for GetPrinterAttributes {
     fn into_ipp_request(self) -> IppRequestResponse {
         let mut retval =
-            IppRequestResponse::new_internal(self.version(), Operation::GetPrinterAttributes, Some(self.printer_uri));
+            IppRequestResponse::new(self.version(), Operation::GetPrinterAttributes, Some(self.printer_uri)).expect("printer URI length check missing");
 
         if !self.attributes.is_empty() {
-            let vals: Vec<IppValue> = self.attributes.into_iter().map(IppValue::Keyword).collect();
+            let vals: Vec<IppValue> = self.attributes.into_iter().map(|v| Ok(IppValue::Keyword(v.try_into()?))).collect::<Result<_, IppParseError>>().expect("validation of attributes missing");
             retval.attributes_mut().add(
                 DelimiterTag::OperationAttributes,
                 IppAttribute::new(
@@ -187,7 +186,7 @@ impl IppOperation for GetPrinterAttributes {
 
 /// IPP operation Create-Job
 pub struct CreateJob {
-    printer_uri: IppString,
+    printer_uri: Uri,
     job_name: Option<IppName>,
     attributes: Vec<IppAttribute>,
 }
@@ -202,7 +201,7 @@ impl CreateJob {
         T: AsRef<str>,
     {
         Ok(CreateJob {
-            printer_uri: printer_uri.try_into()?,
+            printer_uri,
             job_name: job_name.map(|v| v.as_ref().to_string().try_into()).transpose()?,
             attributes: Vec::new(),
         })
@@ -216,15 +215,12 @@ impl CreateJob {
 
 impl IppOperation for CreateJob {
     fn into_ipp_request(self) -> IppRequestResponse {
-        let mut retval = IppRequestResponse::new_internal(self.version(), Operation::CreateJob, Some(self.printer_uri));
+        let mut retval = IppRequestResponse::new(self.version(), Operation::CreateJob, Some(self.printer_uri)).expect("printer URI length check missing");
 
         if let Some(job_name) = self.job_name {
             retval.attributes_mut().add(
                 DelimiterTag::OperationAttributes,
-                IppAttribute::new(
-                    IppAttribute::JOB_NAME.try_into().unwrap(),
-                    IppValue::NameWithoutLanguage(job_name),
-                ),
+                IppAttribute::new(IppAttribute::JOB_NAME, IppValue::NameWithoutLanguage(job_name.try_into().expect("job name length check missing"))),
             )
         }
 
@@ -268,7 +264,7 @@ impl SendDocument {
         D: AsRef<str>,
     {
         Ok(SendDocument {
-            printer_uri: printer_uri.try_into()?,
+            printer_uri,
             job_id,
             payload: payload.into(),
             user_name: user_name.map(|v| v.as_ref().to_string().try_into()).transpose()?,
@@ -280,8 +276,7 @@ impl SendDocument {
 
 impl IppOperation for SendDocument {
     fn into_ipp_request(self) -> IppRequestResponse {
-        let mut retval =
-            IppRequestResponse::new_internal(self.version(), Operation::SendDocument, Some(self.printer_uri));
+        let mut retval = IppRequestResponse::new(self.version(), Operation::SendDocument, Some(self.printer_uri)).expect("printer URI length check missing");
 
         retval.attributes_mut().add(
             DelimiterTag::OperationAttributes,
@@ -307,7 +302,7 @@ impl IppOperation for SendDocument {
 
 /// IPP operation Purge-Jobs
 pub struct PurgeJobs {
-    printer_uri: IppString,
+    printer_uri: Uri,
     user_name: Option<IppName>,
 }
 
@@ -321,7 +316,7 @@ impl PurgeJobs {
         U: AsRef<str>,
     {
         Ok(Self {
-            printer_uri: printer_uri.try_into()?,
+            printer_uri,
             user_name: user_name.map(|u| u.as_ref().to_owned().try_into()).transpose()?,
         })
     }
@@ -329,7 +324,7 @@ impl PurgeJobs {
 
 impl IppOperation for PurgeJobs {
     fn into_ipp_request(self) -> IppRequestResponse {
-        let mut retval = IppRequestResponse::new_internal(self.version(), Operation::PurgeJobs, Some(self.printer_uri));
+        let mut retval = IppRequestResponse::new(self.version(), Operation::PurgeJobs, Some(self.printer_uri)).expect("printer URI length check missing");
 
         with_user_name(self.user_name, &mut retval);
 
@@ -355,7 +350,7 @@ impl CancelJob {
         U: AsRef<str>,
     {
         Ok(Self {
-            printer_uri: printer_uri.try_into()?,
+            printer_uri,
             job_id,
             user_name: user_name.map(|u| u.as_ref().to_owned().try_into()).transpose()?,
         })
@@ -364,7 +359,7 @@ impl CancelJob {
 
 impl IppOperation for CancelJob {
     fn into_ipp_request(self) -> IppRequestResponse {
-        let mut retval = IppRequestResponse::new_internal(self.version(), Operation::CancelJob, Some(self.printer_uri));
+        let mut retval = IppRequestResponse::new(self.version(), Operation::CancelJob, Some(self.printer_uri)).expect("printer URI length check missing");
         retval.attributes_mut().add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(IppAttribute::JOB_ID.try_into().unwrap(), IppValue::Integer(self.job_id)),
@@ -392,7 +387,7 @@ impl GetJobAttributes {
         U: AsRef<str>,
     {
         Ok(Self {
-            printer_uri: printer_uri.try_into()?,
+            printer_uri,
             job_id,
             user_name: user_name.map(|u| u.as_ref().to_owned().try_into()).transpose()?,
         })
@@ -401,8 +396,7 @@ impl GetJobAttributes {
 
 impl IppOperation for GetJobAttributes {
     fn into_ipp_request(self) -> IppRequestResponse {
-        let mut retval =
-            IppRequestResponse::new_internal(self.version(), Operation::GetJobAttributes, Some(self.printer_uri));
+        let mut retval = IppRequestResponse::new(self.version(), Operation::GetJobAttributes, Some(self.printer_uri)).expect("printer URI length check missing");
         retval.attributes_mut().add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(IppAttribute::JOB_ID.try_into().unwrap(), IppValue::Integer(self.job_id)),
@@ -414,7 +408,7 @@ impl IppOperation for GetJobAttributes {
 
 /// IPP operation Get-Jobs
 pub struct GetJobs {
-    printer_uri: IppString,
+    printer_uri: Uri,
     user_name: Option<IppName>,
 }
 
@@ -428,7 +422,7 @@ impl GetJobs {
         U: AsRef<str>,
     {
         Ok(Self {
-            printer_uri: printer_uri.try_into()?,
+            printer_uri,
             user_name: user_name.map(|u| u.as_ref().to_owned().try_into()).transpose()?,
         })
     }
@@ -436,7 +430,7 @@ impl GetJobs {
 
 impl IppOperation for GetJobs {
     fn into_ipp_request(self) -> IppRequestResponse {
-        let mut retval = IppRequestResponse::new_internal(self.version(), Operation::GetJobs, Some(self.printer_uri));
+        let mut retval = IppRequestResponse::new(self.version(), Operation::GetJobs, Some(self.printer_uri)).expect("printer URI length check missing");
 
         with_user_name(self.user_name, &mut retval);
 

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     IppHeader,
+    parser::IppParseError,
     attribute::{IppAttribute, IppAttributes},
     model::{DelimiterTag, IppVersion, Operation, StatusCode},
     parser::IppParseError,
@@ -31,55 +32,38 @@ pub struct IppRequestResponse {
 
 impl IppRequestResponse {
     /// Create new IPP request for the operation and uri
-    pub fn new(
-        version: IppVersion,
-        operation: Operation,
-        uri: Option<Uri>,
-    ) -> Result<IppRequestResponse, IppParseError> {
-        let uri = uri
-            .map(|uri| crate::util::canonicalize_uri(&uri).try_into())
-            .transpose()?;
-        Ok(Self::new_internal(version, operation, uri))
-    }
-
-    pub(crate) fn new_internal(
-        version: IppVersion,
-        operation: Operation,
-        uri: Option<IppString>,
-    ) -> IppRequestResponse {
+    pub fn new(version: IppVersion, operation: Operation, uri: Option<Uri>) -> Result<IppRequestResponse, IppParseError> {
         let header = IppHeader::new(version, operation as u16, 1);
         let mut attributes = IppAttributes::new();
 
-        // unwrap is fine because "utf-8" into bounded string is infallible.
         attributes.add(
             DelimiterTag::OperationAttributes,
-            IppAttribute::new(
-                IppAttribute::ATTRIBUTES_CHARSET.try_into().unwrap(),
-                IppValue::Charset("utf-8".try_into().unwrap()),
-            ),
+            IppAttribute::new(IppAttribute::ATTRIBUTES_CHARSET, IppValue::Charset("utf-8".try_into()?)),
         );
 
-        // unwrap is fine because "en" into bounded string is infallible.
         attributes.add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(
-                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE.try_into().unwrap(),
-                IppValue::NaturalLanguage("en".try_into().unwrap()),
+                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE,
+                IppValue::NaturalLanguage("en".try_into()?),
             ),
         );
 
         if let Some(uri) = uri {
             attributes.add(
                 DelimiterTag::OperationAttributes,
-                IppAttribute::new(IppAttribute::PRINTER_URI.try_into().unwrap(), IppValue::Uri(uri)),
+                IppAttribute::new(
+                    IppAttribute::PRINTER_URI,
+                    IppValue::Uri(crate::util::canonicalize_uri(&uri).try_into()?),
+                ),
             );
         }
 
-        IppRequestResponse {
+        Ok(IppRequestResponse {
             header,
             attributes,
             payload: IppPayload::empty(),
-        }
+        })
     }
 
     /// Create response from status and id
@@ -93,15 +77,12 @@ impl IppRequestResponse {
 
         response.attributes_mut().add(
             DelimiterTag::OperationAttributes,
-            IppAttribute::new(
-                IppAttribute::ATTRIBUTES_CHARSET.try_into().unwrap(),
-                IppValue::Charset("utf-8".try_into()?),
-            ),
+            IppAttribute::new(IppAttribute::ATTRIBUTES_CHARSET, IppValue::Charset("utf-8".try_into()?)),
         );
         response.attributes_mut().add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(
-                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE.try_into().unwrap(),
+                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE,
                 IppValue::NaturalLanguage("en".try_into()?),
             ),
         );
@@ -140,28 +121,28 @@ impl IppRequestResponse {
     }
 
     /// Write request to byte array not including payload
-    pub fn to_bytes(&self) -> Bytes {
+    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
         let mut buffer = BytesMut::new();
         buffer.put(self.header.to_bytes());
-        buffer.put(self.attributes.to_bytes());
-        buffer.freeze()
+        buffer.put(self.attributes.to_bytes()?);
+        Ok(buffer.freeze())
     }
 
     #[cfg(feature = "async")]
     /// Convert request/response into AsyncRead including payload
-    pub fn into_async_read(self) -> impl AsyncRead + Send + Sync + 'static {
-        let header = self.to_bytes();
+    pub fn into_async_read(self) -> Result<impl AsyncRead + Send + Sync + 'static, IppParseError> {
+        let header = self.to_bytes()?;
         trace!("IPP header size: {}", header.len(),);
 
-        futures_util::io::Cursor::new(header).chain(self.payload)
+        Ok(futures_util::io::Cursor::new(header).chain(self.payload))
     }
 
     /// Convert request/response into Read including payload
-    pub fn into_read(self) -> impl Read + Send + Sync + 'static {
-        let header = self.to_bytes();
+    pub fn into_read(self) -> Result<impl Read + Send + Sync + 'static, IppParseError> {
+        let header = self.to_bytes()?;
         trace!("IPP header size: {}", header.len(),);
 
-        io::Cursor::new(header).chain(self.payload)
+        Ok(io::Cursor::new(header).chain(self.payload))
     }
 
     /// Consume request/response and return a payload
