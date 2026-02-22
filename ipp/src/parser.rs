@@ -21,6 +21,9 @@ use crate::{
     value::IppValue,
 };
 
+use std::num::TryFromIntError;
+use std::convert::Infallible;
+
 /// Parse error enum
 #[derive(Debug, thiserror::Error)]
 pub enum IppParseError {
@@ -30,8 +33,19 @@ pub enum IppParseError {
     #[error("Invalid IPP collection")]
     InvalidCollection,
 
+    /// occurs when a string is too long for an IPP Value.
+    #[error("invalid string length: {0}, max: {1}")]
+    InvalidStringLength(usize, u16),
+
+    /// failure to parse int usually used when trying to convert usize -> u16 in this crate
+    #[error(transparent)]
+    TryFromInt(#[from] TryFromIntError),
+
     #[error(transparent)]
     IoError(#[from] io::Error),
+
+    #[error("infallable this should never happen")]
+    Infallible(#[from] Infallible),
 }
 
 // create a single value from one-element list, list otherwise

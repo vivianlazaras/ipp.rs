@@ -144,18 +144,18 @@ impl PrintJobBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
         let op = PrintJob::new(
             self.printer_uri,
             self.payload,
             self.user_name.as_ref(),
             self.job_title.as_ref(),
             self.document_format.as_ref(),
-        );
-        self.attributes.into_iter().fold(op, |mut op, attr| {
+        )?;
+        Ok(self.attributes.into_iter().fold(op, |mut op, attr| {
             op.add_attribute(attr);
             op
-        })
+        }))
     }
 }
 
@@ -240,12 +240,12 @@ impl CreateJobBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
-        let op = CreateJob::new(self.printer_uri, self.job_name.as_ref());
-        self.attributes.into_iter().fold(op, |mut op, attr| {
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
+        let op = CreateJob::new(self.printer_uri, self.job_name.as_ref())?;
+        Ok(self.attributes.into_iter().fold(op, |mut op, attr| {
             op.add_attribute(attr);
             op
-        })
+        }))
     }
 }
 
@@ -296,15 +296,15 @@ impl SendDocumentBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
-        SendDocument::new(
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
+        Ok(SendDocument::new(
             self.printer_uri,
             self.job_id,
             self.payload,
             self.user_name.as_ref(),
             self.document_format.as_ref(),
             self.is_last,
-        )
+        )?)
     }
 }
 
@@ -332,8 +332,8 @@ impl PurgeJobsBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
-        PurgeJobs::new(self.printer_uri, self.user_name)
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
+        Ok(PurgeJobs::new(self.printer_uri, self.user_name)?)
     }
 }
 
@@ -363,8 +363,8 @@ impl CancelJobBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
-        CancelJob::new(self.printer_uri, self.job_id, self.user_name)
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
+        Ok(CancelJob::new(self.printer_uri, self.job_id, self.user_name)?)
     }
 }
 
@@ -394,8 +394,8 @@ impl GetJobAttributesBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
-        GetJobAttributes::new(self.printer_uri, self.job_id, self.user_name)
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
+        Ok(GetJobAttributes::new(self.printer_uri, self.job_id, self.user_name)?)
     }
 }
 
@@ -423,7 +423,7 @@ impl GetJobsBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
         GetJobs::new(self.printer_uri, self.user_name)
     }
 }
