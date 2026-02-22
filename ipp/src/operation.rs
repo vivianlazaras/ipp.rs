@@ -437,7 +437,6 @@ impl GetJobs {
 impl IppOperation for GetJobs {
     fn into_ipp_request(self) -> IppRequestResponse {
         let mut retval = IppRequestResponse::new_internal(self.version(), Operation::GetJobs, Some(self.printer_uri));
-
         with_user_name(self.user_name, &mut retval);
 
         retval

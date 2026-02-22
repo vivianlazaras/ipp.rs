@@ -2,7 +2,10 @@
 //! IPP value
 //!
 #![allow(unused_assignments)]
-use std::{borrow::Cow, collections::BTreeMap, fmt, ops::Deref, str::FromStr};
+
+use std::borrow::Cow;
+use std::ops::Deref;
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enum_as_inner::EnumAsInner;
@@ -262,7 +265,7 @@ impl fmt::Display for IppTextValue {
 #[inline]
 fn get_len_string(data: &mut Bytes) -> String {
     let len = data.get_u16() as usize;
-    let s = String::from_utf8_lossy(&data[0..len]).into_owned();
+    let s = String::from_utf8_lossy(&data[0..len]).into();
     data.advance(len);
     s
 }
@@ -412,7 +415,7 @@ impl IppValue {
     }
 
     /// Write value to byte array, including leading value length field, excluding value tag
-    pub fn to_bytes(&self) -> Bytes {
+    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
         let mut buffer = BytesMut::new();
 
         match *self {
@@ -470,7 +473,7 @@ impl IppValue {
             }
             IppValue::Array(ref list) => {
                 for (i, item) in list.iter().enumerate() {
-                    buffer.put(item.to_bytes());
+                    buffer.put(item.to_bytes()?);
                     if i < list.len() - 1 {
                         buffer.put_u8(self.to_tag());
                         buffer.put_u16(0);
@@ -488,14 +491,14 @@ impl IppValue {
                     // name size is zero, this is a collection
                     buffer.put_u16(0);
 
-                    buffer.put(atr_name.to_bytes());
+                    buffer.put(atr_name.to_bytes()?);
 
                     // item tag
                     buffer.put_u8(item.1.to_tag());
                     // name size is zero, this is a collection
                     buffer.put_u16(0);
 
-                    buffer.put(item.1.to_bytes());
+                    buffer.put(item.1.to_bytes()?);
                 }
                 // write end collection attribute
                 buffer.put_u8(ValueTag::EndCollection as u8);
@@ -541,7 +544,7 @@ impl IppValue {
                 buffer.put_slice(data);
             }
         }
-        buffer.freeze()
+        Ok(buffer.freeze())
     }
 }
 
@@ -683,7 +686,7 @@ mod tests {
     use super::*;
 
     fn value_check(value: IppValue) {
-        let mut b = value.to_bytes();
+        let mut b = value.to_bytes().expect("failed to serialize to bytes");
         b.advance(2); // skip value size
         assert_eq!(IppValue::parse(value.to_tag(), b).unwrap(), value);
     }
@@ -789,7 +792,7 @@ mod tests {
             "list".try_into().unwrap(),
             IppValue::Array(vec![IppValue::Integer(0x1111_1111), IppValue::Integer(0x2222_2222)]),
         );
-        let buf = attr.to_bytes().to_vec();
+        let buf = attr.to_bytes().expect("failed to serialize IppValue").to_vec();
 
         assert_eq!(
             buf,
@@ -829,7 +832,7 @@ mod tests {
                 IppValue::Integer(0x2222_2222),
             )])),
         );
-        let buf = attr.to_bytes();
+        let buf = attr.to_bytes().expect("failed to serialize IppValue");
 
         assert_eq!(
             vec![

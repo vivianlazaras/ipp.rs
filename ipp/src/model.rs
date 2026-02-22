@@ -70,6 +70,15 @@ pub enum Operation {
     CupsGetPPD = 0x400F,
     CupsGetDocument = 0x4027,
     CupsCreateLocalPrinter = 0x4028,
+
+    #[cfg(feature = "ipp-job-extensions")]
+    CancelMyJobs = 0x0039,
+
+    #[cfg(feature = "ipp-job-extensions")]
+    CloseJob = 0x003B,
+
+    #[cfg(feature = "ipp-set-extensions")]
+    IdentifyPrinter = 0x003C,
 }
 
 /// printer-state constants
