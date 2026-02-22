@@ -2,19 +2,16 @@
 //! IPP value
 //!
 #![allow(unused_assignments)]
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr, ops::Deref, io, borrow::Cow};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enum_as_inner::EnumAsInner;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use crate::parser::IppParseError;
 use http::Uri;
-use std::ops::Deref;
-use std::borrow::Cow;
-use std::io;
 
-use crate::{FromPrimitive as _, model::ValueTag};
+use crate::{FromPrimitive as _, model::ValueTag, parser::IppParseError};
 
 /// A UTF-8 string whose length is bounded by a compile-time maximum (in bytes).
 ///
@@ -46,10 +43,10 @@ impl<const MAX: u16> BoundedString<MAX> {
     pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
         let s = s.into();
         let len_usize = s.len();
-        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength(len_usize, MAX))?;
+        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength { len: len_usize, max: MAX })?;
 
         if len > MAX {
-            return Err(IppParseError::InvalidStringLength(len_usize, MAX));
+            return Err(IppParseError::InvalidStringLength { len: len_usize, max: MAX });
         }
 
         Ok(Self(s))
@@ -88,7 +85,7 @@ impl<const MAX: u16> BoundedString<MAX> {
     /// Returns an error if the actual string is too long for the target size.
     pub fn shrink<const MAX2: u16>(self) -> Result<BoundedString<MAX2>, IppParseError> {
         if self.0.len() > MAX2 as usize {
-            return Err(IppParseError::InvalidStringLength(self.0.len(), MAX2));
+            return Err(IppParseError::InvalidStringLength { len: self.0.len(), max: MAX2 });
         }
         Ok(BoundedString::<MAX2>(self.0))
     }
@@ -181,10 +178,10 @@ impl IppTextValue {
         let string = s.into();
         let len = string.len();
         match len {
-            0..=127 => Ok(Self::Short(IppShortString::new(string).expect("bounding error on range check"))),
-            128..=255 => Ok(Self::Medium(BoundedString::<255>::new(string).expect("bounding error on range check"))),
-            256..=1023 => Ok(Self::Long(IppString::new(string).expect("bounding error on range check"))),
-            _ => Err(IppParseError::InvalidStringLength(len.try_into()?, 1023)),
+            0..=127 => Ok(Self::Short(IppShortString::new(string)?)),
+            128..=255 => Ok(Self::Medium(BoundedString::<255>::new(string)?)),
+            256..=1023 => Ok(Self::Long(IppString::new(string)?)),
+            _ => Err(IppParseError::InvalidStringLength { len: len.try_into()?, max: 1023 }),
         }
     }
     pub fn len(&self) -> usize {
@@ -258,14 +255,14 @@ impl fmt::Display for IppTextValue {
 #[inline]
 fn get_len_string(data: &mut Bytes) -> String {
     let len = data.get_u16() as usize;
-    let s = String::from_utf8_lossy(&data[0..len]).try_into().expect("failed to parse IppValue from String");
+    let s = String::from_utf8_lossy(&data[0..len]).into_owned();
     data.advance(len);
     s
 }
 
 /// IPP attribute values as defined in [RFC 8010](https://tools.ietf.org/html/rfc8010)
-/// unfortunately the length for TextWithoutLanguage, TextWithLanguage, and OctetString values is heavily attribute dependant
-/// usual values are 127, 255, and 1023 however as these are attribute dependent, a const generic is used to allow the calling routine to assert expected text length.
+/// the length for TextWithoutLanguage, TextWithLanguage, and OctetString values is heavily attribute dependant
+/// usual values are 127, 255, and 1023 however as these are attribute dependent, a [`IppTextValue`] is used to allow the calling routine to assert expected text length.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum IppValue {
