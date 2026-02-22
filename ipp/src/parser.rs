@@ -389,8 +389,8 @@ mod tests {
         assert_eq!(
             attr.value(),
             &IppValue::Collection(BTreeMap::from([(
-                "abcd".try_into().unwrap(),
-                IppValue::Keyword("key".try_into().unwrap())
+                "abcd".to_string(),
+                IppValue::Keyword("key".try_into().expect("failed to create IPP text value"))
             )]))
         );
     }
@@ -525,7 +525,7 @@ mod tests {
         assert_eq!(
             attr.value(),
             &IppValue::Collection(BTreeMap::from([(
-                "abcd".try_into().unwrap(),
+                "abcd".to_string(),
                 IppValue::Keyword("key".try_into().expect("failed to create IPP text value"))
             )]))
         );
