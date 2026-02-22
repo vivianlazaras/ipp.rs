@@ -3,9 +3,7 @@
 //!
 #![allow(unused_assignments)]
 
-use std::borrow::Cow;
-use std::ops::Deref;
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{borrow::Cow, collections::BTreeMap, fmt, ops::Deref, str::FromStr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enum_as_inner::EnumAsInner;
@@ -265,7 +263,8 @@ impl fmt::Display for IppTextValue {
 #[inline]
 fn get_len_string(data: &mut Bytes) -> String {
     let len = data.get_u16() as usize;
-    let s = String::from_utf8_lossy(&data[0..len]).into();
+
+    let s = String::from_utf8_lossy(&data[0..len]).into_owned();
     data.advance(len);
     s
 }
