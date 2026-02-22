@@ -2,7 +2,7 @@
 //! IPP value
 //!
 #![allow(unused_assignments)]
-use std::{borrow::Cow, collections::BTreeMap, fmt, ops::Deref, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enum_as_inner::EnumAsInner;
@@ -10,6 +10,10 @@ use enum_as_inner::EnumAsInner;
 use http::Uri;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use crate::parser::IppParseError;
+use http::Uri;
+use std::ops::Deref;
+use std::borrow::Cow;
 
 use crate::{FromPrimitive as _, model::ValueTag, parser::IppParseError};
 
@@ -259,17 +263,256 @@ impl fmt::Display for IppTextValue {
     }
 }
 
+/// A UTF-8 string whose length is bounded by a compile-time maximum (in bytes).
+///
+/// This type is primarily used to enforce IPP `text(*)`, `name(*)`,
+/// `keyword`, and related value length limits defined by the IPP specification.
+///
+/// The length constraint is measured in UTF-8 encoded bytes,
+/// not Unicode scalar values.
+///
+/// # Type Parameter
+/// - `MAX`: Maximum allowed length in bytes.
+///
+/// # Errors
+/// Returns [`IppParseError::InvalidStringLength`] if the input exceeds `MAX`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BoundedString<const MAX: u16 = 1023>(String);
+
+pub type IppString = BoundedString;
+pub type IppShortString = BoundedString<127>;
+pub type IppKeyword = BoundedString<255>;
+pub type IppMimeMediaType = BoundedString<255>;
+pub type IppCharset = BoundedString<63>;
+pub type IppLanguage = BoundedString<63>;
+pub type IppName = BoundedString<255>;
+
+impl<const MAX: u16> BoundedString<MAX> {
+    /// attempts to create a bounded string from the given value returning an error if the strings length exceeds the const generic
+    /// defined for the type.
+    pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
+        let s = s.into();
+        let len_usize = s.len();
+        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength(len_usize, MAX))?;
+
+        if len > MAX {
+            return Err(IppParseError::InvalidStringLength(len_usize, MAX));
+        }
+
+        Ok(Self(s))
+    }
+
+    pub const fn max() -> u16 {
+        MAX
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Widen the max size of the bounded string.
+    /// Infallible because all strings of length <= MAX are valid for any larger MAX2.
+    /// if attempting to expand to a smaller `MAX2` the assertion will fail causing a panic.
+    pub fn expand<const MAX2: u16>(self) -> BoundedString<MAX2>
+    {
+        assert!(MAX2 >= MAX);
+        BoundedString::<MAX2>(self.0)
+    }
+
+    /// Attempt to shrink a bounded string to a smaller MAX.
+    /// Returns an error if the actual string is too long for the target size.
+    pub fn shrink<const MAX2: u16>(self) -> Result<BoundedString<MAX2>, IppParseError> {
+        if self.0.len() > MAX2 as usize {
+            return Err(IppParseError::InvalidStringLength(self.0.len(), MAX2));
+        }
+        Ok(BoundedString::<MAX2>(self.0))
+    }
+}
+
+impl<const MAX: u16> From<BoundedString<MAX>> for String {
+    fn from(value: BoundedString<MAX>) -> Self {
+        value.0
+    }
+}
+
+impl<const MAX: u16> std::borrow::Borrow<str> for BoundedString<MAX> {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<const MAX: u16> AsRef<str> for BoundedString<MAX> {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<const MAX: u16> Deref for BoundedString<MAX> {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<const MAX: u16> FromStr for BoundedString<MAX> {
+    type Err = IppParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
+impl<const MAX: u16> TryFrom<&str> for BoundedString<MAX> {
+    type Error = IppParseError;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl<const MAX: u16> TryFrom<String> for BoundedString<MAX> {
+    type Error = IppParseError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl<const MAX: u16> TryFrom<Cow<'_, str>> for BoundedString<MAX> {
+    type Error = IppParseError;
+    fn try_from(s: Cow<'_, str>) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl<const MAX: u16> fmt::Display for BoundedString<MAX> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<const MAX: u16> TryFrom<Uri> for BoundedString<MAX> {
+    type Error = IppParseError;
+    fn try_from(u: Uri) -> Result<Self, Self::Error> {
+        u.to_string().try_into()
+    }
+}
+
+/// Represents an IPP `text(*)` value with length-tiered encoding.
+///
+/// IPP defines multiple text encodings depending on maximum length:
+/// - 0–127 bytes
+/// - 128–255 bytes
+/// - 256–1023 bytes
+///
+/// This enum selects the smallest valid representation automatically.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum IppTextValue {
+    Short(IppShortString),
+    Medium(BoundedString<255>),
+    Long(IppString),
+}
+
+impl IppTextValue {
+    pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
+        let string = s.into();
+        let len = string.len();
+        match len {
+            0..=127 => Ok(Self::Short(IppShortString::new(string).expect("bounding error on range check"))),
+            128..=255 => Ok(Self::Medium(BoundedString::<255>::new(string).expect("bounding error on range check"))),
+            256..=1023 => Ok(Self::Long(IppString::new(string).expect("bounding error on range check"))),
+            _ => Err(IppParseError::InvalidStringLength(len.try_into()?, 1023)),
+        }
+    }
+    pub fn len(&self) -> usize {
+        self.as_ref().len()
+    }
+}
+
+impl From<IppShortString> for IppTextValue {
+    fn from(value: IppShortString) -> Self {
+        Self::Short(value)
+    }
+}
+
+impl From<BoundedString<255>> for IppTextValue {
+    fn from(value: BoundedString<255>) -> Self {
+        Self::Medium(value)
+    }
+}
+
+impl From<IppString> for IppTextValue {
+    fn from(value: IppString) -> Self {
+        Self::Long(value)
+    }
+}
+
+impl AsRef<str> for IppTextValue {
+    fn as_ref(&self) -> &str {
+        match self {
+            IppTextValue::Short(s) => s.as_ref(),
+            IppTextValue::Medium(s) => s.as_ref(),
+            IppTextValue::Long(s) => s.as_ref(),
+        }
+    }
+}
+
+impl Deref for IppTextValue {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.as_ref()
+    }
+}
+
+impl TryFrom<&str> for IppTextValue {
+    type Error = IppParseError;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl TryFrom<String> for IppTextValue {
+    type Error = IppParseError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl TryFrom<Cow<'_, str>> for IppTextValue {
+    type Error = IppParseError;
+    fn try_from(s: Cow<'_, str>) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl fmt::Display for IppTextValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_ref())
+    }
+}
+
 #[inline]
 fn get_len_string(data: &mut Bytes) -> String {
     let len = data.get_u16() as usize;
-    let s = String::from_utf8_lossy(&data[0..len]).into_owned();
+    let s = String::from_utf8_lossy(&data[0..len]).try_into().expect("failed to parse IppValue from String");
     data.advance(len);
     s
 }
 
 /// IPP attribute values as defined in [RFC 8010](https://tools.ietf.org/html/rfc8010)
-/// the length for TextWithoutLanguage, TextWithLanguage, and OctetString values is heavily attribute dependant
-/// usual values are 127, 255, and 1023 however as these are attribute dependent, a [`IppTextValue`] is used to allow the calling routine to assert expected text length.
+/// unfortunately the length for TextWithoutLanguage, TextWithLanguage, and OctetString values is heavily attribute dependant
+/// usual values are 127, 255, and 1023 however as these are attribute dependent, a const generic is used to allow the calling routine to assert expected text length.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum IppValue {
@@ -297,7 +540,7 @@ pub enum IppValue {
     Boolean(bool),
     Keyword(IppKeyword),
     Array(Vec<IppValue>),
-    Collection(BTreeMap<IppName, IppValue>),
+    Collection(BTreeMap<String, IppValue>),
     MimeMediaType(IppMimeMediaType),
     DateTime {
         year: u16,
@@ -412,7 +655,7 @@ impl IppValue {
     }
 
     /// Write value to byte array, including leading value length field, excluding value tag
-    pub fn to_bytes(&self) -> Bytes {
+    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
         let mut buffer = BytesMut::new();
 
         match *self {
@@ -430,27 +673,28 @@ impl IppValue {
                 buffer.put_u8(b as u8);
             }
             IppValue::Keyword(ref s) | IppValue::NameWithoutLanguage(ref s) => {
-                buffer.put_u16(s.len() as u16);
+                buffer.put_u16(s.len().try_into()?);
                 buffer.put_slice(s.as_bytes());
-            }
+            },
             IppValue::OctetString(ref s) => {
-                buffer.put_u16(s.len() as u16);
+                buffer.put_u16(s.len().try_into()?);
                 buffer.put_slice(s.as_bytes());
-            }
+            },
             IppValue::TextWithoutLanguage(ref s) => {
-                buffer.put_u16(s.len() as u16);
+                buffer.put_u16(s.len().try_into()?);
                 buffer.put_slice(s.as_bytes());
-            }
-
+            },
+            
             IppValue::Charset(ref s) | IppValue::NaturalLanguage(ref s) => {
-                buffer.put_u16(s.len() as u16);
+                buffer.put_u16(s.len().try_into()?);
                 buffer.put_slice(s.as_bytes());
-            }
+            },
             IppValue::Uri(ref s) | IppValue::UriScheme(ref s) => {
-                buffer.put_u16(s.len() as u16);
+                buffer.put_u16(s.len().try_into()?);
                 buffer.put_slice(s.as_bytes());
-            }
-            IppValue::MimeMediaType(ref s) | IppValue::MemberAttrName(ref s) => {
+            },
+            IppValue::MimeMediaType(ref s)
+            | IppValue::MemberAttrName(ref s) => {
                 buffer.put_u16(s.len() as u16);
                 buffer.put_slice(s.as_bytes());
             }
@@ -470,7 +714,7 @@ impl IppValue {
             }
             IppValue::Array(ref list) => {
                 for (i, item) in list.iter().enumerate() {
-                    buffer.put(item.to_bytes());
+                    buffer.put(item.to_bytes()?);
                     if i < list.len() - 1 {
                         buffer.put_u8(self.to_tag());
                         buffer.put_u16(0);
@@ -482,20 +726,20 @@ impl IppValue {
                 buffer.put_u16(0);
 
                 for item in list.iter() {
-                    let atr_name: IppValue = IppValue::MemberAttrName(item.0.clone());
+                    let atr_name: IppValue = IppValue::MemberAttrName(item.0.to_string().try_into()?);
                     // item tag
                     buffer.put_u8(atr_name.to_tag());
                     // name size is zero, this is a collection
                     buffer.put_u16(0);
 
-                    buffer.put(atr_name.to_bytes());
+                    buffer.put(atr_name.to_bytes()?);
 
                     // item tag
                     buffer.put_u8(item.1.to_tag());
                     // name size is zero, this is a collection
                     buffer.put_u16(0);
 
-                    buffer.put(item.1.to_bytes());
+                    buffer.put(item.1.to_bytes()?);
                 }
                 // write end collection attribute
                 buffer.put_u8(ValueTag::EndCollection as u8);
@@ -541,7 +785,7 @@ impl IppValue {
                 buffer.put_slice(data);
             }
         }
-        buffer.freeze()
+        Ok(buffer.freeze())
     }
 }
 
@@ -554,17 +798,21 @@ impl fmt::Display for IppValue {
             IppValue::Boolean(b) => write!(f, "{}", if b { "true" } else { "false" }),
             IppValue::Keyword(ref s) | IppValue::NameWithoutLanguage(ref s) => {
                 write!(f, "{s}")
-            }
-            IppValue::OctetString(ref s) | IppValue::TextWithoutLanguage(ref s) => {
+            },
+            IppValue::OctetString(ref s)
+            | IppValue::TextWithoutLanguage(ref s) => {
+                write!(f, "{s}")
+            },
+            IppValue::Charset(ref s)
+            | IppValue::NaturalLanguage(ref s) => {
                 write!(f, "{s}")
             }
-            IppValue::Charset(ref s) | IppValue::NaturalLanguage(ref s) => {
+            IppValue::Uri(ref s)
+            | IppValue::UriScheme(ref s) => {
                 write!(f, "{s}")
-            }
-            IppValue::Uri(ref s) | IppValue::UriScheme(ref s) => {
-                write!(f, "{s}")
-            }
-            IppValue::MimeMediaType(ref s) | IppValue::MemberAttrName(ref s) => write!(f, "{s}"),
+            },
+            IppValue::MimeMediaType(ref s)
+            | IppValue::MemberAttrName(ref s) => write!(f, "{s}"),
             IppValue::TextWithLanguage { ref language, ref text } => write!(f, "{language}:{text}"),
             IppValue::NameWithLanguage { ref language, ref name } => write!(f, "{language}:{name}"),
             IppValue::Array(ref array) => {
@@ -683,7 +931,7 @@ mod tests {
     use super::*;
 
     fn value_check(value: IppValue) {
-        let mut b = value.to_bytes();
+        let mut b = value.to_bytes().expect("failed to serialize to bytes");
         b.advance(2); // skip value size
         assert_eq!(IppValue::parse(value.to_tag(), b).unwrap(), value);
     }
@@ -789,7 +1037,7 @@ mod tests {
             "list".try_into().unwrap(),
             IppValue::Array(vec![IppValue::Integer(0x1111_1111), IppValue::Integer(0x2222_2222)]),
         );
-        let buf = attr.to_bytes().to_vec();
+        let buf = attr.to_bytes().expect("failed to serialize IppValue").to_vec();
 
         assert_eq!(
             buf,
@@ -829,7 +1077,7 @@ mod tests {
                 IppValue::Integer(0x2222_2222),
             )])),
         );
-        let buf = attr.to_bytes();
+        let buf = attr.to_bytes().expect("failed to serialize IppValue");
 
         assert_eq!(
             vec![
