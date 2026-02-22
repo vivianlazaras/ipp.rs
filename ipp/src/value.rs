@@ -12,6 +12,7 @@ use crate::parser::IppParseError;
 use http::Uri;
 use std::ops::Deref;
 use std::borrow::Cow;
+use std::io;
 
 use crate::{FromPrimitive as _, model::ValueTag};
 
@@ -691,26 +692,26 @@ mod tests {
     fn test_value_single() {
         value_check(IppValue::Integer(1234));
         value_check(IppValue::Enum(4321));
-        value_check(IppValue::OctetString("octet-string".to_owned()));
-        value_check(IppValue::TextWithoutLanguage("text-without".to_owned()));
-        value_check(IppValue::NameWithoutLanguage("name-without".to_owned()));
+        value_check(IppValue::OctetString("octet-string".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::TextWithoutLanguage("text-without".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::NameWithoutLanguage("name-without".try_into().expect("failed to create IPP text value")));
         value_check(IppValue::TextWithLanguage {
-            language: "en".to_owned(),
-            text: "text-with".to_owned(),
+            language: "en".try_into().expect("failed to create IPP text value"),
+            text: "text-with".try_into().expect("failed to create IPP text value"),
         });
         value_check(IppValue::NameWithLanguage {
-            language: "en".to_owned(),
-            name: "name-with".to_owned(),
+            language: "en".try_into().expect("failed to create IPP text value"),
+            name: "name-with".try_into().expect("failed to create IPP text value"),
         });
-        value_check(IppValue::Charset("charset".to_owned()));
-        value_check(IppValue::NaturalLanguage("natural".to_owned()));
-        value_check(IppValue::Uri("uri".to_owned()));
-        value_check(IppValue::UriScheme("urischeme".to_owned()));
+        value_check(IppValue::Charset("charset".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::NaturalLanguage("natural".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::Uri("uri".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::UriScheme("urischeme".try_into().expect("failed to create IPP text value")));
         value_check(IppValue::RangeOfInteger { min: -12, max: 45 });
         value_check(IppValue::Boolean(true));
         value_check(IppValue::Boolean(false));
-        value_check(IppValue::Keyword("keyword".to_owned()));
-        value_check(IppValue::MimeMediaType("mime".to_owned()));
+        value_check(IppValue::Keyword("keyword".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::MimeMediaType("mime".try_into().expect("failed to create IPP text value")));
         value_check(IppValue::DateTime {
             year: 2020,
             month: 2,
@@ -723,7 +724,7 @@ mod tests {
             utc_hours: 1,
             utc_mins: 30,
         });
-        value_check(IppValue::MemberAttrName("member".to_owned()));
+        value_check(IppValue::MemberAttrName("member".try_into().expect("failed to create IPP text value")));
         value_check(IppValue::Resolution {
             cross_feed: 800,
             feed: 600,
