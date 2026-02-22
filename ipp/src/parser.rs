@@ -6,6 +6,7 @@ use std::{
     convert::Infallible,
     io::{self, Read},
     num::TryFromIntError,
+    convert:: Infallible
 };
 
 use bytes::Bytes;
@@ -23,9 +24,6 @@ use crate::{
     value::{IppName, IppValue},
 };
 
-use std::num::TryFromIntError;
-use std::convert::Infallible;
-
 /// Parse error enum
 #[derive(Debug, thiserror::Error)]
 pub enum IppParseError {
@@ -36,17 +34,17 @@ pub enum IppParseError {
     InvalidCollection,
 
     /// occurs when a string is too long for an IPP Value.
-    #[error("invalid string length: {0}, max: {1}")]
-    InvalidStringLength(usize, u16),
+    #[error("invalid string length: {len}, max: {max}")]
+    InvalidStringLength { len: usize, max: u16 },
 
     /// failure to parse int usually used when trying to convert usize -> u16 in this crate
     #[error(transparent)]
-    TryFromInt(#[from] TryFromIntError),
+    InvalidIntValue(#[from] TryFromIntError),
 
     #[error(transparent)]
     IoError(#[from] io::Error),
 
-    #[error("infallable this should never happen")]
+    #[error("infallible this should never happen")]
     Infallible(#[from] Infallible),
 }
 
