@@ -388,7 +388,7 @@ mod tests {
             attr.value(),
             &IppValue::Collection(BTreeMap::from([(
                 "abcd".to_string(),
-                IppValue::Keyword("key".to_owned())
+                IppValue::Keyword("key".try_into().expect("failed to create IPP text value"))
             )]))
         );
     }
@@ -524,7 +524,7 @@ mod tests {
             attr.value(),
             &IppValue::Collection(BTreeMap::from([(
                 "abcd".to_string(),
-                IppValue::Keyword("key".to_owned())
+                IppValue::Keyword("key".try_into().expect("failed to create IPP text value"))
             )]))
         );
     }

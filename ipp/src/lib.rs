@@ -34,7 +34,7 @@
 //!         IppVersion::v1_1(),
 //!         Operation::GetPrinterAttributes,
 //!         Some(uri.clone())
-//!     );
+//!     ).expect("failed to create request");
 //!     let client = AsyncIppClient::new(uri);
 //!     let resp = client.send(req).await?;
 //!     if resp.header().status_code().is_success() {
