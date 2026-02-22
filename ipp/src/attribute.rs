@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use bytes::{BufMut, Bytes, BytesMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
+use crate::parser::IppParseError;
 use crate::{model::DelimiterTag, value::IppValue};
 
 macro_rules! define_attributes {
@@ -116,7 +116,6 @@ impl IppAttribute {
         URI_AUTHENTICATION_SUPPORTED => "uri-authentication-supported",
         URI_SECURITY_SUPPORTED => "uri-security-supported",
     }
-
     // Per section 4.1.4. Character Set and Natural Language Operation Attributes
     // The "attributes-charset" and "attributes-natural-language" attributes MUST be the first two attributes
     // in every IPP request and response, as part of the initial Operation Attributes group of the IPP message
@@ -165,14 +164,14 @@ impl IppAttribute {
     }
 
     /// Write attribute to byte array
-    pub fn to_bytes(&self) -> Bytes {
+    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
         let mut buffer = BytesMut::new();
 
         buffer.put_u8(self.value.to_tag());
         buffer.put_u16(self.name.len() as u16);
         buffer.put_slice(self.name.as_bytes());
-        buffer.put(self.value.to_bytes());
-        buffer.freeze()
+        buffer.put(self.value.to_bytes()?);
+        Ok(buffer.freeze())
     }
 }
 
@@ -262,7 +261,7 @@ impl IppAttributes {
     }
 
     /// Write attribute list to byte array
-    pub fn to_bytes(&self) -> Bytes {
+    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
         let mut buffer = BytesMut::new();
 
         // put the required attributes first as described in section 4.1.4 of RFC8011
@@ -271,14 +270,14 @@ impl IppAttributes {
         if let Some(group) = self.groups_of(DelimiterTag::OperationAttributes).next() {
             for hdr in &IppAttribute::HEADER_ATTRS {
                 if let Some(attr) = group.attributes().get(*hdr) {
-                    buffer.put(attr.to_bytes());
+                    buffer.put(attr.to_bytes()?);
                 }
             }
 
             // now the other operation attributes
             for attr in group.attributes().values() {
                 if !is_header_attr(attr.name()) {
-                    buffer.put(attr.to_bytes());
+                    buffer.put(attr.to_bytes()?);
                 }
             }
         }
@@ -292,11 +291,11 @@ impl IppAttributes {
             buffer.put_u8(group.tag() as u8);
 
             for attr in group.attributes().values() {
-                buffer.put(attr.to_bytes());
+                buffer.put(attr.to_bytes()?);
             }
         }
         buffer.put_u8(DelimiterTag::EndOfAttributes as u8);
 
-        buffer.freeze()
+        Ok(buffer.freeze())
     }
 }
