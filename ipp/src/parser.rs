@@ -6,7 +6,6 @@ use std::{
     convert::Infallible,
     io::{self, Read},
     num::TryFromIntError,
-    convert:: Infallible
 };
 
 use bytes::Bytes;
@@ -387,8 +386,8 @@ mod tests {
         assert_eq!(
             attr.value(),
             &IppValue::Collection(BTreeMap::from([(
-                "abcd".to_string(),
-                IppValue::Keyword("key".try_into().expect("failed to create IPP text value"))
+                "abcd".try_into().unwrap(),
+                IppValue::Keyword("key".try_into().unwrap())
             )]))
         );
     }
@@ -523,7 +522,7 @@ mod tests {
         assert_eq!(
             attr.value(),
             &IppValue::Collection(BTreeMap::from([(
-                "abcd".to_string(),
+                "abcd".try_into().unwrap(),
                 IppValue::Keyword("key".try_into().expect("failed to create IPP text value"))
             )]))
         );
