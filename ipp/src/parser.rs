@@ -34,7 +34,7 @@ pub enum IppParseError {
 
     /// occurs when a string is too long for an IPP Value.
     #[error("invalid string length: {len}, max: {max}")]
-    InvalidStringLength { len: usize, max: u16 },
+    InvalidStringLength { len: usize, max: usize },
 
     /// failure to parse int usually used when trying to convert usize -> u16 in this crate
     #[error(transparent)]
