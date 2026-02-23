@@ -36,40 +36,50 @@ impl IppRequestResponse {
         operation: Operation,
         uri: Option<Uri>,
     ) -> Result<IppRequestResponse, IppParseError> {
+        let uri = uri
+            .map(|uri| crate::util::canonicalize_uri(&uri).try_into())
+            .transpose()?;
+        Ok(Self::new_internal(version, operation, uri))
+    }
+
+    pub(crate) fn new_internal(
+        version: IppVersion,
+        operation: Operation,
+        uri: Option<IppString>,
+    ) -> IppRequestResponse {
         let header = IppHeader::new(version, operation as u16, 1);
         let mut attributes = IppAttributes::new();
 
+        // unwrap is fine because "utf-8" into bounded string is infallible.
         attributes.add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(
-                IppAttribute::ATTRIBUTES_CHARSET.into(),
-                IppValue::Charset("utf-8".try_into()?),
+                IppAttribute::ATTRIBUTES_CHARSET.try_into().unwrap(),
+                IppValue::Charset("utf-8".try_into().unwrap()),
             ),
         );
 
+        // unwrap is fine because "en" into bounded string is infallible.
         attributes.add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(
-                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE.into(),
-                IppValue::NaturalLanguage("en".try_into()?),
+                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE.try_into().unwrap(),
+                IppValue::NaturalLanguage("en".try_into().unwrap()),
             ),
         );
 
         if let Some(uri) = uri {
             attributes.add(
                 DelimiterTag::OperationAttributes,
-                IppAttribute::new(
-                    IppAttribute::PRINTER_URI.into(),
-                    IppValue::Uri(crate::util::canonicalize_uri(&uri).try_into()?),
-                ),
+                IppAttribute::new(IppAttribute::PRINTER_URI.try_into().unwrap(), IppValue::Uri(uri)),
             );
         }
 
-        Ok(IppRequestResponse {
+        IppRequestResponse {
             header,
             attributes,
             payload: IppPayload::empty(),
-        })
+        }
     }
 
     /// Create response from status and id
@@ -84,14 +94,14 @@ impl IppRequestResponse {
         response.attributes_mut().add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(
-                IppAttribute::ATTRIBUTES_CHARSET.into(),
+                IppAttribute::ATTRIBUTES_CHARSET.try_into().unwrap(),
                 IppValue::Charset("utf-8".try_into()?),
             ),
         );
         response.attributes_mut().add(
             DelimiterTag::OperationAttributes,
             IppAttribute::new(
-                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE.into(),
+                IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE.try_into().unwrap(),
                 IppValue::NaturalLanguage("en".try_into()?),
             ),
         );
