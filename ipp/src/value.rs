@@ -27,7 +27,7 @@ use crate::{FromPrimitive as _, model::ValueTag, parser::IppParseError};
 /// # Errors
 /// Returns [`IppParseError::InvalidStringLength`] if the input exceeds `MAX`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BoundedString<const MAX: u16 = 1023> {
+pub struct BoundedString<const MAX: usize = 1023> {
     inner: String,
 }
 
@@ -39,28 +39,21 @@ pub type IppCharset = BoundedString<63>;
 pub type IppLanguage = BoundedString<63>;
 pub type IppName = BoundedString<255>;
 
-impl<const MAX: u16> BoundedString<MAX> {
+impl<const MAX: usize> BoundedString<MAX> {
     /// attempts to create a bounded string from the given value returning an error if the strings length exceeds the const generic
     /// defined for the type.
     pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
         let s = s.into();
-        let len_usize = s.len();
-        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength {
-            len: len_usize,
-            max: MAX,
-        })?;
+        let len = s.len();
 
         if len > MAX {
-            return Err(IppParseError::InvalidStringLength {
-                len: len_usize,
-                max: MAX,
-            });
+            return Err(IppParseError::InvalidStringLength { len, max: MAX });
         }
 
         Ok(Self { inner: s })
     }
 
-    pub const fn max() -> u16 {
+    pub const fn max() -> usize {
         MAX
     }
 
@@ -83,15 +76,15 @@ impl<const MAX: u16> BoundedString<MAX> {
     /// Widen the max size of the bounded string.
     /// Infallible because all strings of length <= MAX are valid for any larger MAX2.
     /// if attempting to expand to a smaller `MAX2` the assertion will fail causing a panic.
-    pub fn expand<const MAX2: u16>(self) -> BoundedString<MAX2> {
+    pub fn expand<const MAX2: usize>(self) -> BoundedString<MAX2> {
         assert!(MAX2 >= MAX);
         BoundedString::<MAX2> { inner: self.inner }
     }
 
     /// Attempt to shrink a bounded string to a smaller MAX.
     /// Returns an error if the actual string is too long for the target size.
-    pub fn shrink<const MAX2: u16>(self) -> Result<BoundedString<MAX2>, IppParseError> {
-        if self.len() > MAX2 as usize {
+    pub fn shrink<const MAX2: usize>(self) -> Result<BoundedString<MAX2>, IppParseError> {
+        if self.len() > MAX2 {
             return Err(IppParseError::InvalidStringLength {
                 len: self.len(),
                 max: MAX2,
@@ -101,49 +94,38 @@ impl<const MAX: u16> BoundedString<MAX> {
     }
 }
 
-impl<const MAX: u16, const CAP: usize> From<&[u8; CAP]> for BoundedString<MAX> {
+trait IsEqual<const A: usize, const B: usize> {}
+
+impl<const N: usize> IsEqual<N, N> for () {}
+
+impl<const MAX: usize, const CAP: usize> From<&[u8; CAP]> for BoundedString<MAX>
+where
+    (): IsEqual<MAX, CAP>,
+{
     fn from(value: &[u8; CAP]) -> BoundedString<MAX> {
-        Self::from_array(value)
-    }
-}
-
-const fn capacity_assertion(max: u16, capacity: usize) -> usize {
-    assert!(max as usize == capacity);
-    capacity
-}
-
-pub trait FromArray<const CAP: usize> {
-    const CAPACITY: usize;
-    fn from_array(value: &[u8; CAP]) -> Self;
-}
-
-impl<const MAX: u16, const CAP: usize> FromArray<CAP> for BoundedString<MAX> {
-    const CAPACITY: usize = capacity_assertion(MAX, CAP);
-    fn from_array(value: &[u8; CAP]) -> Self {
-        assert_eq!(MAX as usize, CAP);
         String::from_utf8_lossy(value).try_into().unwrap()
     }
 }
 
-impl<const MAX: u16> From<BoundedString<MAX>> for String {
+impl<const MAX: usize> From<BoundedString<MAX>> for String {
     fn from(value: BoundedString<MAX>) -> Self {
         value.inner
     }
 }
 
-impl<const MAX: u16> std::borrow::Borrow<str> for BoundedString<MAX> {
+impl<const MAX: usize> std::borrow::Borrow<str> for BoundedString<MAX> {
     fn borrow(&self) -> &str {
         &self.inner
     }
 }
 
-impl<const MAX: u16> AsRef<str> for BoundedString<MAX> {
+impl<const MAX: usize> AsRef<str> for BoundedString<MAX> {
     fn as_ref(&self) -> &str {
         &self.inner
     }
 }
 
-impl<const MAX: u16> Deref for BoundedString<MAX> {
+impl<const MAX: usize> Deref for BoundedString<MAX> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -151,41 +133,41 @@ impl<const MAX: u16> Deref for BoundedString<MAX> {
     }
 }
 
-impl<const MAX: u16> FromStr for BoundedString<MAX> {
+impl<const MAX: usize> FromStr for BoundedString<MAX> {
     type Err = IppParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::new(s)
     }
 }
 
-impl<const MAX: u16> TryFrom<&str> for BoundedString<MAX> {
+impl<const MAX: usize> TryFrom<&str> for BoundedString<MAX> {
     type Error = IppParseError;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         Self::new(s)
     }
 }
 
-impl<const MAX: u16> TryFrom<String> for BoundedString<MAX> {
+impl<const MAX: usize> TryFrom<String> for BoundedString<MAX> {
     type Error = IppParseError;
     fn try_from(s: String) -> Result<Self, Self::Error> {
         Self::new(s)
     }
 }
 
-impl<const MAX: u16> TryFrom<Cow<'_, str>> for BoundedString<MAX> {
+impl<const MAX: usize> TryFrom<Cow<'_, str>> for BoundedString<MAX> {
     type Error = IppParseError;
     fn try_from(s: Cow<'_, str>) -> Result<Self, Self::Error> {
         Self::new(s)
     }
 }
 
-impl<const MAX: u16> fmt::Display for BoundedString<MAX> {
+impl<const MAX: usize> fmt::Display for BoundedString<MAX> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.inner)
     }
 }
 
-impl<const MAX: u16> TryFrom<Uri> for BoundedString<MAX> {
+impl<const MAX: usize> TryFrom<Uri> for BoundedString<MAX> {
     type Error = IppParseError;
     fn try_from(u: Uri) -> Result<Self, Self::Error> {
         u.to_string().try_into()
@@ -718,6 +700,13 @@ mod tests {
         b.advance(2); // skip value size
         assert_eq!(IppValue::parse(value.to_tag(), b).unwrap(), value);
     }
+
+    /*
+    // this is a test that deliberately fails to compile as it uses a trait conditional evaluation to check the type of non equal const generics
+    #[test]
+    fn should_fail_to_compile() {
+        let ipp_name: BoundedString = IppAttribute::ATTRIBUTES_CHARSET.into();
+    }*/
 
     #[test]
     fn test_value_single() {
