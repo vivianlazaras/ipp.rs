@@ -94,19 +94,6 @@ impl<const MAX: usize> BoundedString<MAX> {
     }
 }
 
-trait IsEqual<const A: usize, const B: usize> {}
-
-impl<const N: usize> IsEqual<N, N> for () {}
-
-impl<const MAX: usize, const CAP: usize> From<&[u8; CAP]> for BoundedString<MAX>
-where
-    (): IsEqual<MAX, CAP>,
-{
-    fn from(value: &[u8; CAP]) -> BoundedString<MAX> {
-        String::from_utf8_lossy(value).try_into().unwrap()
-    }
-}
-
 impl<const MAX: usize> From<BoundedString<MAX>> for String {
     fn from(value: BoundedString<MAX>) -> Self {
         value.inner

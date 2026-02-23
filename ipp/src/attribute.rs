@@ -12,31 +12,14 @@ use bytes::{BufMut, Bytes, BytesMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-const fn str_to_fixed_255(s: &str) -> [u8; 255] {
-    let bytes = s.as_bytes();
-    let mut out = [0u8; 255];
-
-    let mut i = 0;
-    while i < bytes.len() && i < 255 {
-        out[i] = bytes[i];
-        i += 1;
-    }
-
-    out
-}
-
 macro_rules! define_attributes {
     ($($name:ident => $value:literal),* $(,)?) => {
-        $(pub const $name: &[u8; 255] = &str_to_fixed_255($value);)*
+        $(pub const $name: &'static str = $value;)*
     };
 }
 
 fn is_header_attr(attr: &str) -> bool {
-    let hdrattr: [u8; 255] = match attr.as_bytes().try_into() {
-        Ok(hdr) => hdr,
-        _ => return false,
-    };
-    IppAttribute::HEADER_ATTRS.contains(&&hdrattr)
+    IppAttribute::HEADER_ATTRS.contains(&attr)
 }
 
 /// `IppAttribute` represents an IPP attribute
@@ -149,7 +132,7 @@ impl IppAttribute {
     //    attributes (i.e., the "printer-uri" and "job-id" attributes), the
     //    "printer-uri" attribute MUST be the third attribute and the
     //    "job-id" attribute MUST be the fourth attribute.
-    const HEADER_ATTRS: [&[u8; 255]; 3] = [
+    const HEADER_ATTRS: [&'static str; 3] = [
         IppAttribute::ATTRIBUTES_CHARSET,
         IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE,
         IppAttribute::PRINTER_URI,
@@ -298,8 +281,7 @@ impl IppAttributes {
 
         if let Some(group) = self.groups_of(DelimiterTag::OperationAttributes).next() {
             for hdr in &IppAttribute::HEADER_ATTRS {
-                let hdrattr: IppName = (*hdr).into();
-                if let Some(attr) = group.attributes().get(&hdrattr) {
+                if let Some(attr) = group.attributes().get(*hdr) {
                     buffer.put(attr.to_bytes());
                 }
             }

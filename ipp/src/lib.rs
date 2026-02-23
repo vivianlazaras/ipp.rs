@@ -49,7 +49,7 @@
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let uri: Uri = "http://localhost:631/printers/test-printer".parse()?;
-//!     let operation = IppOperationBuilder::get_printer_attributes(uri.clone()).build();
+//!     let operation = IppOperationBuilder::get_printer_attributes(uri.clone()).build()?;
 //!     let client = IppClient::new(uri);
 //!     let resp = client.send(operation)?;
 //!     if resp.header().status_code().is_success() {
