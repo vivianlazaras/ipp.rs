@@ -194,7 +194,7 @@ impl GetPrinterAttributesBuilder {
     }
 
     /// Build operation
-    pub fn build(self) -> impl IppOperation {
+    pub fn build(self) -> Result<impl IppOperation, IppParseError> {
         GetPrinterAttributes::with_attributes(self.printer_uri, &self.attributes)
     }
 }
