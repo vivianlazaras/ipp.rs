@@ -2,14 +2,14 @@
 //! IPP value
 //!
 #![allow(unused_assignments)]
-use std::{collections::BTreeMap, fmt, str::FromStr, ops::Deref, io, borrow::Cow};
+use std::{borrow::Cow, collections::BTreeMap, fmt, ops::Deref, str::FromStr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enum_as_inner::EnumAsInner;
 
+use http::Uri;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use http::Uri;
 
 use crate::{FromPrimitive as _, model::ValueTag, parser::IppParseError};
 
@@ -26,8 +26,10 @@ use crate::{FromPrimitive as _, model::ValueTag, parser::IppParseError};
 ///
 /// # Errors
 /// Returns [`IppParseError::InvalidStringLength`] if the input exceeds `MAX`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BoundedString<const MAX: u16 = 1023>(String);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BoundedString<const MAX: u16 = 1023> {
+    inner: String,
+}
 
 pub type IppString = BoundedString;
 pub type IppShortString = BoundedString<127>;
@@ -43,13 +45,19 @@ impl<const MAX: u16> BoundedString<MAX> {
     pub fn new(s: impl Into<String>) -> Result<Self, IppParseError> {
         let s = s.into();
         let len_usize = s.len();
-        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength { len: len_usize, max: MAX })?;
+        let len: u16 = len_usize.try_into().map_err(|_| IppParseError::InvalidStringLength {
+            len: len_usize,
+            max: MAX,
+        })?;
 
         if len > MAX {
-            return Err(IppParseError::InvalidStringLength { len: len_usize, max: MAX });
+            return Err(IppParseError::InvalidStringLength {
+                len: len_usize,
+                max: MAX,
+            });
         }
 
-        Ok(Self(s))
+        Ok(Self { inner: s })
     }
 
     pub const fn max() -> u16 {
@@ -57,55 +65,81 @@ impl<const MAX: u16> BoundedString<MAX> {
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.inner
     }
 
     pub fn into_inner(self) -> String {
-        self.0
+        self.inner
     }
 
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.inner.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.inner.is_empty()
     }
 
     /// Widen the max size of the bounded string.
     /// Infallible because all strings of length <= MAX are valid for any larger MAX2.
     /// if attempting to expand to a smaller `MAX2` the assertion will fail causing a panic.
-    pub fn expand<const MAX2: u16>(self) -> BoundedString<MAX2>
-    {
+    pub fn expand<const MAX2: u16>(self) -> BoundedString<MAX2> {
         assert!(MAX2 >= MAX);
-        BoundedString::<MAX2>(self.0)
+        BoundedString::<MAX2> { inner: self.inner }
     }
 
     /// Attempt to shrink a bounded string to a smaller MAX.
     /// Returns an error if the actual string is too long for the target size.
     pub fn shrink<const MAX2: u16>(self) -> Result<BoundedString<MAX2>, IppParseError> {
-        if self.0.len() > MAX2 as usize {
-            return Err(IppParseError::InvalidStringLength { len: self.0.len(), max: MAX2 });
+        if self.len() > MAX2 as usize {
+            return Err(IppParseError::InvalidStringLength {
+                len: self.len(),
+                max: MAX2,
+            });
         }
-        Ok(BoundedString::<MAX2>(self.0))
+        Ok(BoundedString::<MAX2> { inner: self.inner })
+    }
+}
+
+impl<const MAX: u16, const CAP: usize> From<&[u8; CAP]> for BoundedString<MAX> {
+    fn from(value: &[u8; CAP]) -> BoundedString<MAX> {
+        Self::from_array(value)
+    }
+}
+
+const fn capacity_assertion(max: u16, capacity: usize) -> usize {
+    assert!(max as usize == capacity);
+    capacity
+}
+
+pub trait FromArray<const CAP: usize> {
+    const CAPACITY: usize;
+    fn from_array(value: &[u8; CAP]) -> Self;
+}
+
+impl<const MAX: u16, const CAP: usize> FromArray<CAP> for BoundedString<MAX> {
+    const CAPACITY: usize = capacity_assertion(MAX, CAP);
+    fn from_array(value: &[u8; CAP]) -> Self {
+        assert_eq!(MAX as usize, CAP);
+        String::from_utf8_lossy(value).try_into().unwrap()
     }
 }
 
 impl<const MAX: u16> From<BoundedString<MAX>> for String {
     fn from(value: BoundedString<MAX>) -> Self {
-        value.0
+        value.inner
     }
 }
 
 impl<const MAX: u16> std::borrow::Borrow<str> for BoundedString<MAX> {
     fn borrow(&self) -> &str {
-        &self.0
+        &self.inner
     }
 }
 
 impl<const MAX: u16> AsRef<str> for BoundedString<MAX> {
     fn as_ref(&self) -> &str {
-        &self.0
+        &self.inner
     }
 }
 
@@ -113,7 +147,7 @@ impl<const MAX: u16> Deref for BoundedString<MAX> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
@@ -147,7 +181,7 @@ impl<const MAX: u16> TryFrom<Cow<'_, str>> for BoundedString<MAX> {
 
 impl<const MAX: u16> fmt::Display for BoundedString<MAX> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.inner)
     }
 }
 
@@ -181,11 +215,15 @@ impl IppTextValue {
             0..=127 => Ok(Self::Short(IppShortString::new(string)?)),
             128..=255 => Ok(Self::Medium(BoundedString::<255>::new(string)?)),
             256..=1023 => Ok(Self::Long(IppString::new(string)?)),
-            _ => Err(IppParseError::InvalidStringLength { len: len.try_into()?, max: 1023 }),
+            _ => Err(IppParseError::InvalidStringLength { len, max: 1023 }),
         }
     }
     pub fn len(&self) -> usize {
         self.as_ref().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.as_ref().is_empty()
     }
 }
 
@@ -221,7 +259,7 @@ impl Deref for IppTextValue {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.as_ref()
+        self.as_ref()
     }
 }
 
@@ -290,7 +328,7 @@ pub enum IppValue {
     Boolean(bool),
     Keyword(IppKeyword),
     Array(Vec<IppValue>),
-    Collection(BTreeMap<String, IppValue>),
+    Collection(BTreeMap<IppName, IppValue>),
     MimeMediaType(IppMimeMediaType),
     DateTime {
         year: u16,
@@ -405,7 +443,7 @@ impl IppValue {
     }
 
     /// Write value to byte array, including leading value length field, excluding value tag
-    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
+    pub fn to_bytes(&self) -> Bytes {
         let mut buffer = BytesMut::new();
 
         match *self {
@@ -423,28 +461,27 @@ impl IppValue {
                 buffer.put_u8(b as u8);
             }
             IppValue::Keyword(ref s) | IppValue::NameWithoutLanguage(ref s) => {
-                buffer.put_u16(s.len().try_into()?);
+                buffer.put_u16(s.len() as u16);
                 buffer.put_slice(s.as_bytes());
-            },
+            }
             IppValue::OctetString(ref s) => {
-                buffer.put_u16(s.len().try_into()?);
+                buffer.put_u16(s.len() as u16);
                 buffer.put_slice(s.as_bytes());
-            },
+            }
             IppValue::TextWithoutLanguage(ref s) => {
-                buffer.put_u16(s.len().try_into()?);
+                buffer.put_u16(s.len() as u16);
                 buffer.put_slice(s.as_bytes());
-            },
-            
+            }
+
             IppValue::Charset(ref s) | IppValue::NaturalLanguage(ref s) => {
-                buffer.put_u16(s.len().try_into()?);
+                buffer.put_u16(s.len() as u16);
                 buffer.put_slice(s.as_bytes());
-            },
+            }
             IppValue::Uri(ref s) | IppValue::UriScheme(ref s) => {
-                buffer.put_u16(s.len().try_into()?);
+                buffer.put_u16(s.len() as u16);
                 buffer.put_slice(s.as_bytes());
-            },
-            IppValue::MimeMediaType(ref s)
-            | IppValue::MemberAttrName(ref s) => {
+            }
+            IppValue::MimeMediaType(ref s) | IppValue::MemberAttrName(ref s) => {
                 buffer.put_u16(s.len() as u16);
                 buffer.put_slice(s.as_bytes());
             }
@@ -464,7 +501,7 @@ impl IppValue {
             }
             IppValue::Array(ref list) => {
                 for (i, item) in list.iter().enumerate() {
-                    buffer.put(item.to_bytes()?);
+                    buffer.put(item.to_bytes());
                     if i < list.len() - 1 {
                         buffer.put_u8(self.to_tag());
                         buffer.put_u16(0);
@@ -476,20 +513,20 @@ impl IppValue {
                 buffer.put_u16(0);
 
                 for item in list.iter() {
-                    let atr_name: IppValue = IppValue::MemberAttrName(item.0.to_string().try_into()?);
+                    let atr_name: IppValue = IppValue::MemberAttrName(item.0.clone());
                     // item tag
                     buffer.put_u8(atr_name.to_tag());
                     // name size is zero, this is a collection
                     buffer.put_u16(0);
 
-                    buffer.put(atr_name.to_bytes()?);
+                    buffer.put(atr_name.to_bytes());
 
                     // item tag
                     buffer.put_u8(item.1.to_tag());
                     // name size is zero, this is a collection
                     buffer.put_u16(0);
 
-                    buffer.put(item.1.to_bytes()?);
+                    buffer.put(item.1.to_bytes());
                 }
                 // write end collection attribute
                 buffer.put_u8(ValueTag::EndCollection as u8);
@@ -535,7 +572,7 @@ impl IppValue {
                 buffer.put_slice(data);
             }
         }
-        Ok(buffer.freeze())
+        buffer.freeze()
     }
 }
 
@@ -548,21 +585,17 @@ impl fmt::Display for IppValue {
             IppValue::Boolean(b) => write!(f, "{}", if b { "true" } else { "false" }),
             IppValue::Keyword(ref s) | IppValue::NameWithoutLanguage(ref s) => {
                 write!(f, "{s}")
-            },
-            IppValue::OctetString(ref s)
-            | IppValue::TextWithoutLanguage(ref s) => {
-                write!(f, "{s}")
-            },
-            IppValue::Charset(ref s)
-            | IppValue::NaturalLanguage(ref s) => {
+            }
+            IppValue::OctetString(ref s) | IppValue::TextWithoutLanguage(ref s) => {
                 write!(f, "{s}")
             }
-            IppValue::Uri(ref s)
-            | IppValue::UriScheme(ref s) => {
+            IppValue::Charset(ref s) | IppValue::NaturalLanguage(ref s) => {
                 write!(f, "{s}")
-            },
-            IppValue::MimeMediaType(ref s)
-            | IppValue::MemberAttrName(ref s) => write!(f, "{s}"),
+            }
+            IppValue::Uri(ref s) | IppValue::UriScheme(ref s) => {
+                write!(f, "{s}")
+            }
+            IppValue::MimeMediaType(ref s) | IppValue::MemberAttrName(ref s) => write!(f, "{s}"),
             IppValue::TextWithLanguage { ref language, ref text } => write!(f, "{language}:{text}"),
             IppValue::NameWithLanguage { ref language, ref name } => write!(f, "{language}:{name}"),
             IppValue::Array(ref array) => {
@@ -671,6 +704,7 @@ impl<'a> Iterator for IppValueIterator<'a> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::io;
 
     use crate::attribute::IppAttribute;
     use crate::model::DelimiterTag;
@@ -680,7 +714,7 @@ mod tests {
     use super::*;
 
     fn value_check(value: IppValue) {
-        let mut b = value.to_bytes().expect("failed to serialize to bytes");
+        let mut b = value.to_bytes();
         b.advance(2); // skip value size
         assert_eq!(IppValue::parse(value.to_tag(), b).unwrap(), value);
     }
@@ -689,9 +723,15 @@ mod tests {
     fn test_value_single() {
         value_check(IppValue::Integer(1234));
         value_check(IppValue::Enum(4321));
-        value_check(IppValue::OctetString("octet-string".try_into().expect("failed to create IPP text value")));
-        value_check(IppValue::TextWithoutLanguage("text-without".try_into().expect("failed to create IPP text value")));
-        value_check(IppValue::NameWithoutLanguage("name-without".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::OctetString(
+            "octet-string".try_into().expect("failed to create IPP text value"),
+        ));
+        value_check(IppValue::TextWithoutLanguage(
+            "text-without".try_into().expect("failed to create IPP text value"),
+        ));
+        value_check(IppValue::NameWithoutLanguage(
+            "name-without".try_into().expect("failed to create IPP text value"),
+        ));
         value_check(IppValue::TextWithLanguage {
             language: "en".try_into().expect("failed to create IPP text value"),
             text: "text-with".try_into().expect("failed to create IPP text value"),
@@ -700,15 +740,27 @@ mod tests {
             language: "en".try_into().expect("failed to create IPP text value"),
             name: "name-with".try_into().expect("failed to create IPP text value"),
         });
-        value_check(IppValue::Charset("charset".try_into().expect("failed to create IPP text value")));
-        value_check(IppValue::NaturalLanguage("natural".try_into().expect("failed to create IPP text value")));
-        value_check(IppValue::Uri("uri".try_into().expect("failed to create IPP text value")));
-        value_check(IppValue::UriScheme("urischeme".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::Charset(
+            "charset".try_into().expect("failed to create IPP text value"),
+        ));
+        value_check(IppValue::NaturalLanguage(
+            "natural".try_into().expect("failed to create IPP text value"),
+        ));
+        value_check(IppValue::Uri(
+            "uri".try_into().expect("failed to create IPP text value"),
+        ));
+        value_check(IppValue::UriScheme(
+            "urischeme".try_into().expect("failed to create IPP text value"),
+        ));
         value_check(IppValue::RangeOfInteger { min: -12, max: 45 });
         value_check(IppValue::Boolean(true));
         value_check(IppValue::Boolean(false));
-        value_check(IppValue::Keyword("keyword".try_into().expect("failed to create IPP text value")));
-        value_check(IppValue::MimeMediaType("mime".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::Keyword(
+            "keyword".try_into().expect("failed to create IPP text value"),
+        ));
+        value_check(IppValue::MimeMediaType(
+            "mime".try_into().expect("failed to create IPP text value"),
+        ));
         value_check(IppValue::DateTime {
             year: 2020,
             month: 2,
@@ -721,7 +773,9 @@ mod tests {
             utc_hours: 1,
             utc_mins: 30,
         });
-        value_check(IppValue::MemberAttrName("member".try_into().expect("failed to create IPP text value")));
+        value_check(IppValue::MemberAttrName(
+            "member".try_into().expect("failed to create IPP text value"),
+        ));
         value_check(IppValue::Resolution {
             cross_feed: 800,
             feed: 600,
@@ -756,10 +810,10 @@ mod tests {
     #[test]
     fn test_array() {
         let attr = IppAttribute::new(
-            "list",
+            "list".try_into().unwrap(),
             IppValue::Array(vec![IppValue::Integer(0x1111_1111), IppValue::Integer(0x2222_2222)]),
         );
-        let buf = attr.to_bytes().expect("failed to serialize IppValue").to_vec();
+        let buf = attr.to_bytes().to_vec();
 
         assert_eq!(
             buf,
@@ -793,10 +847,13 @@ mod tests {
     #[test]
     fn test_collection() {
         let attr = IppAttribute::new(
-            "coll",
-            IppValue::Collection(BTreeMap::from([("abcd".to_string(), IppValue::Integer(0x2222_2222))])),
+            "coll".try_into().unwrap(),
+            IppValue::Collection(BTreeMap::from([(
+                "abcd".try_into().unwrap(),
+                IppValue::Integer(0x2222_2222),
+            )])),
         );
-        let buf = attr.to_bytes().expect("failed to serialize IppValue");
+        let buf = attr.to_bytes();
 
         assert_eq!(
             vec![
@@ -823,7 +880,10 @@ mod tests {
         let attr = attrs.get("coll").unwrap();
         assert_eq!(
             attr.value(),
-            &IppValue::Collection(BTreeMap::from([("abcd".to_string(), IppValue::Integer(0x2222_2222))]))
+            &IppValue::Collection(BTreeMap::from([(
+                "abcd".try_into().unwrap(),
+                IppValue::Integer(0x2222_2222)
+            )]))
         );
     }
 }

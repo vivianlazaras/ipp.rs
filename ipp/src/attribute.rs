@@ -3,20 +3,40 @@
 //!
 use std::collections::HashMap;
 
+use crate::parser::IppParseError;
+use crate::{
+    model::DelimiterTag,
+    value::{IppName, IppValue},
+};
 use bytes::{BufMut, Bytes, BytesMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use crate::parser::IppParseError;
-use crate::{model::DelimiterTag, value::IppValue};
+
+const fn str_to_fixed_255(s: &str) -> [u8; 255] {
+    let bytes = s.as_bytes();
+    let mut out = [0u8; 255];
+
+    let mut i = 0;
+    while i < bytes.len() && i < 255 {
+        out[i] = bytes[i];
+        i += 1;
+    }
+
+    out
+}
 
 macro_rules! define_attributes {
     ($($name:ident => $value:literal),* $(,)?) => {
-        $(pub const $name: &'static str = $value;)*
+        $(pub const $name: &[u8; 255] = &str_to_fixed_255($value);)*
     };
 }
 
 fn is_header_attr(attr: &str) -> bool {
-    IppAttribute::HEADER_ATTRS.contains(&attr)
+    let hdrattr: [u8; 255] = match attr.as_bytes().try_into() {
+        Ok(hdr) => hdr,
+        _ => return false,
+    };
+    IppAttribute::HEADER_ATTRS.contains(&&hdrattr)
 }
 
 /// `IppAttribute` represents an IPP attribute
@@ -24,7 +44,7 @@ fn is_header_attr(attr: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct IppAttribute {
     /// Attribute name
-    name: String,
+    name: IppName,
     /// Attribute value
     value: IppValue,
 }
@@ -130,7 +150,7 @@ impl IppAttribute {
     //    attributes (i.e., the "printer-uri" and "job-id" attributes), the
     //    "printer-uri" attribute MUST be the third attribute and the
     //    "job-id" attribute MUST be the fourth attribute.
-    const HEADER_ATTRS: [&'static str; 3] = [
+    const HEADER_ATTRS: [&[u8; 255]; 3] = [
         IppAttribute::ATTRIBUTES_CHARSET,
         IppAttribute::ATTRIBUTES_NATURAL_LANGUAGE,
         IppAttribute::PRINTER_URI,
@@ -140,18 +160,26 @@ impl IppAttribute {
     ///
     /// * `name` - Attribute name<br/>
     /// * `value` - Attribute value<br/>
-    pub fn new<S>(name: S, value: IppValue) -> IppAttribute
+    pub fn new(name: IppName, value: IppValue) -> IppAttribute {
+        IppAttribute { name, value }
+    }
+
+    /// Create new instance of the attribute
+    ///
+    /// * `name` - Attribute name<br/>
+    /// * `value` - Attribute value<br/>
+    pub fn with_name<S>(name: S, value: IppValue) -> Result<IppAttribute, IppParseError>
     where
         S: AsRef<str>,
     {
-        IppAttribute {
-            name: name.as_ref().to_owned(),
+        Ok(IppAttribute {
+            name: name.as_ref().try_into()?,
             value,
-        }
+        })
     }
 
     /// Return attribute name
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &IppName {
         &self.name
     }
 
@@ -166,14 +194,14 @@ impl IppAttribute {
     }
 
     /// Write attribute to byte array
-    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
+    pub fn to_bytes(&self) -> Bytes {
         let mut buffer = BytesMut::new();
 
         buffer.put_u8(self.value.to_tag());
         buffer.put_u16(self.name.len() as u16);
         buffer.put_slice(self.name.as_bytes());
-        buffer.put(self.value.to_bytes()?);
-        Ok(buffer.freeze())
+        buffer.put(self.value.to_bytes());
+        buffer.freeze()
     }
 }
 
@@ -182,7 +210,7 @@ impl IppAttribute {
 #[derive(Clone, Debug)]
 pub struct IppAttributeGroup {
     tag: DelimiterTag,
-    attributes: HashMap<String, IppAttribute>,
+    attributes: HashMap<IppName, IppAttribute>,
 }
 
 impl IppAttributeGroup {
@@ -200,17 +228,17 @@ impl IppAttributeGroup {
     }
 
     /// Return read-only attributes
-    pub fn attributes(&self) -> &HashMap<String, IppAttribute> {
+    pub fn attributes(&self) -> &HashMap<IppName, IppAttribute> {
         &self.attributes
     }
 
     /// Return mutable attributes
-    pub fn attributes_mut(&mut self) -> &mut HashMap<String, IppAttribute> {
+    pub fn attributes_mut(&mut self) -> &mut HashMap<IppName, IppAttribute> {
         &mut self.attributes
     }
 
     /// Consume this group and return mutable attributes
-    pub fn into_attributes(self) -> HashMap<String, IppAttribute> {
+    pub fn into_attributes(self) -> HashMap<IppName, IppAttribute> {
         self.attributes
     }
 }
@@ -263,7 +291,7 @@ impl IppAttributes {
     }
 
     /// Write attribute list to byte array
-    pub fn to_bytes(&self) -> Result<Bytes, IppParseError> {
+    pub fn to_bytes(&self) -> Bytes {
         let mut buffer = BytesMut::new();
 
         // put the required attributes first as described in section 4.1.4 of RFC8011
@@ -271,15 +299,16 @@ impl IppAttributes {
 
         if let Some(group) = self.groups_of(DelimiterTag::OperationAttributes).next() {
             for hdr in &IppAttribute::HEADER_ATTRS {
-                if let Some(attr) = group.attributes().get(*hdr) {
-                    buffer.put(attr.to_bytes()?);
+                let hdrattr: IppName = (*hdr).into();
+                if let Some(attr) = group.attributes().get(&hdrattr) {
+                    buffer.put(attr.to_bytes());
                 }
             }
 
             // now the other operation attributes
             for attr in group.attributes().values() {
                 if !is_header_attr(attr.name()) {
-                    buffer.put(attr.to_bytes()?);
+                    buffer.put(attr.to_bytes());
                 }
             }
         }
@@ -293,11 +322,11 @@ impl IppAttributes {
             buffer.put_u8(group.tag() as u8);
 
             for attr in group.attributes().values() {
-                buffer.put(attr.to_bytes()?);
+                buffer.put(attr.to_bytes());
             }
         }
         buffer.put_u8(DelimiterTag::EndOfAttributes as u8);
 
-        Ok(buffer.freeze())
+        buffer.freeze()
     }
 }
