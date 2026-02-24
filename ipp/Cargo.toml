@@ -52,12 +52,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = ["async-client-rustls"]
-ipp3d = ["ipp-job-extensions", "ipp-set-extensions", "ipp-system-service", "ipp-notifications", "ipp-job-set-operations"]
-ipp-notifications = []
-ipp-system-service = []
-ipp-job-extensions = []
-ipp-set-extensions = []
-ipp-job-set-operations = []
 serde = ["dep:serde", "bytes/serde"]
 async = ["futures-util", "futures-executor"]
 async-client = ["async", "reqwest", "tokio-util", "base64"]
