@@ -32,6 +32,7 @@ pub struct IppAttribute {
     value: IppValue,
 }
 
+#[cfg(feature = "ipp3d")]
 impl IppAttribute {
     define_attributes! {
         ATTRIBUTES_CHARSET => "attributes-charset",
