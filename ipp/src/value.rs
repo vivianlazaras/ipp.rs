@@ -27,6 +27,7 @@ use crate::{FromPrimitive as _, model::ValueTag, parser::IppParseError};
 /// # Errors
 /// Returns [`IppParseError::InvalidStringLength`] if the input exceeds `MAX`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BoundedString<const MAX: usize = 1023> {
     inner: String,
 }
@@ -170,6 +171,7 @@ impl<const MAX: usize> TryFrom<Uri> for BoundedString<MAX> {
 ///
 /// This enum selects the smallest valid representation automatically.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum IppTextValue {
     Short(IppShortString),
     Medium(BoundedString<255>),
